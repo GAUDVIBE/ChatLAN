@@ -84,6 +84,11 @@ nameInput.value = localStorage.getItem('chat-name') || '';
 nameInput.addEventListener('input', () => localStorage.setItem('chat-name', nameInput.value));
 
 function addMessage(msg) {
+  if (msg.clear) {
+    messagesEl.innerHTML = '';
+    return;
+  }
+  
   const el = document.createElement('div');
   el.className = 'msg' + (msg.system ? ' system' : '');
   const time = new Date(msg.time * 1000).toLocaleTimeString();
@@ -315,7 +320,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if text == '/clear':
                 with history_lock:
                     history.clear()
-                broadcast({'text': 'Historique effacé', 'system': True, 'time': time.time()})
+                broadcast({'clear': True, 'time': time.time()})
             else:
                 broadcast({'name': name, 'text': text, 'time': time.time()})
             
