@@ -5,17 +5,24 @@ import threading
 import queue
 import socket
 import time
-from urllib.parse import urlparse
+import os
+import base64
+import mimetypes
+from urllib.parse import urlparse, parse_qs
+from io import BytesIO
 
 PORT = 8080
 MAX_HISTORY = 200
 MAX_TEXT_LEN = 50000
-MAX_BODY_BYTES = 1_000_000
+MAX_FILE_SIZE = 10_000_000
+MAX_BODY_BYTES = 15_000_000
 
 clients = []
 clients_lock = threading.Lock()
 history = []
 history_lock = threading.Lock()
+files = {}
+files_lock = threading.Lock()
 
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="fr">
@@ -36,6 +43,8 @@ INDEX_HTML = """<!DOCTYPE html>
   .msg .body { white-space: pre-wrap; }
   .msg .time { color: #6c7086; font-size: 11px; margin-left: 6px; }
   .msg.system { color: #6c7086; font-style: italic; font-size: 13px; }
+  .msg .file-link { display: inline-block; margin-top: 4px; padding: 6px 10px; background: #313244; border-radius: 6px; color: #89b4fa; text-decoration: none; font-size: 13px; border: 1px solid #45475a; }
+  .msg .file-link:hover { background: #45475a; }
   form { display: flex; padding: 10px 12px; gap: 8px; background: #181825; border-top: 1px solid #313244; align-items: flex-end; }
   input, textarea, button { font-size: 14px; padding: 9px 12px; border-radius: 6px; border: 1px solid #313244; background: #313244; color: #cdd6f4; font-family: inherit; }
   input:focus, textarea:focus { outline: none; border-color: #89b4fa; }
@@ -44,6 +53,9 @@ INDEX_HTML = """<!DOCTYPE html>
   button { background: #89b4fa; color: #1e1e2e; cursor: pointer; border-color: #89b4fa; font-weight: 600; }
   button:hover { background: #74c7ec; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #fileBtn { background: #a6e3a1; border-color: #a6e3a1; padding: 9px 12px; font-size: 14px; min-width: auto; }
+  #fileBtn:hover { background: #94e2d5; }
+  #fileInput { display: none; }
 </style>
 </head>
 <body>
@@ -54,7 +66,9 @@ INDEX_HTML = """<!DOCTYPE html>
 <div id="messages"></div>
 <form id="form" autocomplete="off">
   <input id="name" placeholder="Nom" maxlength="40" required>
-  <textarea id="text" placeholder="Message... (Entree = envoyer, Maj+Entree = nouvelle ligne)" rows="1" required></textarea>
+  <textarea id="text" placeholder="Message... (Entree = envoyer, Maj+Entree = nouvelle ligne)" rows="1"></textarea>
+  <input type="file" id="fileInput" multiple>
+  <button type="button" id="fileBtn">📎</button>
   <button type="submit">Envoyer</button>
 </form>
 <script>
@@ -63,6 +77,8 @@ const form = document.getElementById('form');
 const nameInput = document.getElementById('name');
 const textInput = document.getElementById('text');
 const statusEl = document.getElementById('status');
+const fileInput = document.getElementById('fileInput');
+const fileBtn = document.getElementById('fileBtn');
 
 nameInput.value = localStorage.getItem('chat-name') || '';
 nameInput.addEventListener('input', () => localStorage.setItem('chat-name', nameInput.value));
@@ -71,19 +87,47 @@ function addMessage(msg) {
   const el = document.createElement('div');
   el.className = 'msg' + (msg.system ? ' system' : '');
   const time = new Date(msg.time * 1000).toLocaleTimeString();
-  const body = document.createElement('span'); body.className = 'body'; body.textContent = msg.text;
+  
   if (msg.system) {
+    const body = document.createElement('span');
+    body.className = 'body';
+    body.textContent = msg.text;
     el.appendChild(body);
   } else {
-    const n = document.createElement('span'); n.className = 'name'; n.textContent = msg.name + ':';
+    const n = document.createElement('span');
+    n.className = 'name';
+    n.textContent = msg.name + ':';
     el.appendChild(n);
-    el.appendChild(body);
+    
+    if (msg.file) {
+      const link = document.createElement('a');
+      link.className = 'file-link';
+      link.href = '/file/' + msg.file.id;
+      link.textContent = '📎 ' + msg.file.name + ' (' + formatBytes(msg.file.size) + ')';
+      link.target = '_blank';
+      el.appendChild(link);
+    } else {
+      const body = document.createElement('span');
+      body.className = 'body';
+      body.textContent = msg.text;
+      el.appendChild(body);
+    }
   }
-  const t = document.createElement('span'); t.className = 'time'; t.textContent = time;
+  
+  const t = document.createElement('span');
+  t.className = 'time';
+  t.textContent = time;
   el.appendChild(t);
+  
   const stick = messagesEl.scrollTop + messagesEl.clientHeight >= messagesEl.scrollHeight - 40;
   messagesEl.appendChild(el);
   if (stick) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' o';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' Ko';
+  return (bytes/(1024*1024)).toFixed(1) + ' Mo';
 }
 
 function connect() {
@@ -108,6 +152,36 @@ textInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     form.requestSubmit();
   }
+});
+
+fileBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', async () => {
+  const name = nameInput.value.trim();
+  if (!name) { alert('Entrez votre nom'); return; }
+  
+  const files = Array.from(fileInput.files);
+  if (!files.length) return;
+  
+  for (const file of files) {
+    if (file.size > 10*1024*1024) {
+      alert('Fichier trop volumineux (max 10 Mo): ' + file.name);
+      continue;
+    }
+    
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('file', file);
+    
+    try {
+      await fetch('/upload', { method: 'POST', body: formData });
+    } catch (err) {
+      statusEl.textContent = 'erreur envoi';
+      statusEl.classList.add('off');
+    }
+  }
+  
+  fileInput.value = '';
 });
 
 form.addEventListener('submit', async (e) => {
@@ -166,6 +240,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        
         if path == '/events':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
@@ -198,25 +273,130 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     except ValueError:
                         pass
             return
+        
+        if path.startswith('/file/'):
+            file_id = path[6:]
+            with files_lock:
+                file_data = files.get(file_id)
+            if not file_data:
+                self.send_error(404)
+                return
+            
+            self.send_response(200)
+            mime_type = file_data.get('mime', 'application/octet-stream')
+            self.send_header('Content-Type', mime_type)
+            self.send_header('Content-Disposition', f'attachment; filename="{file_data["name"]}"')
+            self.send_header('Content-Length', str(len(file_data['data'])))
+            self.end_headers()
+            self.wfile.write(file_data['data'])
+            return
+        
         self.send_error(404)
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != '/send':
-            self.send_error(404); return
-        length = int(self.headers.get('Content-Length', '0') or 0)
-        if length <= 0 or length > MAX_BODY_BYTES:
-            self.send_error(413); return
-        try:
-            data = json.loads(self.rfile.read(length))
-            name = str(data.get('name', '')).strip()[:40]
-            text = str(data.get('text', '')).strip()[:MAX_TEXT_LEN]
-        except Exception:
-            self.send_error(400); return
-        if not name or not text:
-            self.send_error(400); return
-        broadcast({'name': name, 'text': text, 'time': time.time()})
-        self.send_response(204); self.end_headers()
+        
+        if path == '/send':
+            length = int(self.headers.get('Content-Length', '0') or 0)
+            if length <= 0 or length > MAX_BODY_BYTES:
+                self.send_error(413)
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+                name = str(data.get('name', '')).strip()[:40]
+                text = str(data.get('text', '')).strip()[:MAX_TEXT_LEN]
+            except Exception:
+                self.send_error(400)
+                return
+            if not name or not text:
+                self.send_error(400)
+                return
+            broadcast({'name': name, 'text': text, 'time': time.time()})
+            self.send_response(204)
+            self.end_headers()
+            return
+        
+        if path == '/upload':
+            content_type = self.headers.get('Content-Type', '')
+            if not content_type.startswith('multipart/form-data'):
+                self.send_error(400)
+                return
+            
+            length = int(self.headers.get('Content-Length', '0') or 0)
+            if length <= 0 or length > MAX_BODY_BYTES:
+                self.send_error(413)
+                return
+            
+            try:
+                boundary = content_type.split('boundary=')[1].encode()
+                body = self.rfile.read(length)
+                
+                parts = body.split(b'--' + boundary)
+                name = None
+                file_name = None
+                file_data = None
+                
+                for part in parts:
+                    if b'Content-Disposition' not in part:
+                        continue
+                    
+                    headers_end = part.find(b'\r\n\r\n')
+                    if headers_end == -1:
+                        continue
+                    
+                    headers = part[:headers_end].decode('utf-8', errors='ignore')
+                    content = part[headers_end+4:]
+                    
+                    if content.endswith(b'\r\n'):
+                        content = content[:-2]
+                    
+                    if 'name="name"' in headers:
+                        name = content.decode('utf-8', errors='ignore').strip()[:40]
+                    elif 'name="file"' in headers and 'filename=' in headers:
+                        filename_start = headers.find('filename="') + 10
+                        filename_end = headers.find('"', filename_start)
+                        file_name = headers[filename_start:filename_end]
+                        file_data = content
+                
+                if not name or not file_name or not file_data:
+                    self.send_error(400)
+                    return
+                
+                if len(file_data) > MAX_FILE_SIZE:
+                    self.send_error(413)
+                    return
+                
+                file_id = base64.urlsafe_b64encode(os.urandom(12)).decode()
+                mime_type, _ = mimetypes.guess_type(file_name)
+                
+                with files_lock:
+                    files[file_id] = {
+                        'name': file_name,
+                        'data': file_data,
+                        'mime': mime_type or 'application/octet-stream',
+                        'size': len(file_data),
+                        'time': time.time()
+                    }
+                
+                broadcast({
+                    'name': name,
+                    'file': {
+                        'id': file_id,
+                        'name': file_name,
+                        'size': len(file_data)
+                    },
+                    'time': time.time()
+                })
+                
+                self.send_response(204)
+                self.end_headers()
+                return
+                
+            except Exception as e:
+                self.send_error(400)
+                return
+        
+        self.send_error(404)
 
 class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
