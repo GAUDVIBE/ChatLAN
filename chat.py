@@ -311,7 +311,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not name or not text:
                 self.send_error(400)
                 return
-            broadcast({'name': name, 'text': text, 'time': time.time()})
+            
+            if text == '/clear':
+                with history_lock:
+                    history.clear()
+                broadcast({'text': 'Historique effacé', 'system': True, 'time': time.time()})
+            else:
+                broadcast({'name': name, 'text': text, 'time': time.time()})
+            
             self.send_response(204)
             self.end_headers()
             return
