@@ -60,6 +60,8 @@ INDEX_HTML = """<!DOCTYPE html>
   #fileBtn { background: #a6e3a1; border-color: #a6e3a1; padding: 9px 12px; font-size: 14px; min-width: auto; }
   #fileBtn:hover { background: #94e2d5; }
   #fileInput { display: none; }
+  #dropOverlay { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(30,30,46,0.86); align-items: center; justify-content: center; font-size: 22px; font-weight: 600; color: #89b4fa; pointer-events: none; box-shadow: inset 0 0 0 4px #89b4fa; }
+  body.dragging #dropOverlay { display: flex; }
 </style>
 </head>
 <body>
@@ -68,6 +70,7 @@ INDEX_HTML = """<!DOCTYPE html>
   <span id="status" class="off">connexion...</span>
 </header>
 <div id="messages"></div>
+<div id="dropOverlay">📎 Deposez vos fichiers ici</div>
 <form id="form" autocomplete="off">
   <input id="name" placeholder="Nom" maxlength="40" required>
   <textarea id="text" placeholder="Message... (Entree = envoyer, Maj+Entree = nouvelle ligne)" rows="1"></textarea>
@@ -181,23 +184,23 @@ textInput.addEventListener('keydown', (e) => {
 
 fileBtn.addEventListener('click', () => fileInput.click());
 
-fileInput.addEventListener('change', async () => {
+async function uploadFiles(fileList) {
   const name = nameInput.value.trim();
   if (!name) { alert('Entrez votre nom'); return; }
-  
-  const files = Array.from(fileInput.files);
+
+  const files = Array.from(fileList);
   if (!files.length) return;
-  
+
   for (const file of files) {
     if (file.size > 10*1024*1024) {
       alert('Fichier trop volumineux (max 10 Mo): ' + file.name);
       continue;
     }
-    
+
     const formData = new FormData();
     formData.append('name', name);
     formData.append('file', file);
-    
+
     try {
       await fetch('/upload', { method: 'POST', body: formData });
     } catch (err) {
@@ -205,8 +208,37 @@ fileInput.addEventListener('change', async () => {
       statusEl.classList.add('off');
     }
   }
-  
+}
+
+fileInput.addEventListener('change', async () => {
+  await uploadFiles(fileInput.files);
   fileInput.value = '';
+});
+
+// Glisser-deposer de fichiers n'importe ou dans la fenetre
+let dragDepth = 0;
+function filesBeingDragged(e) {
+  return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+}
+['dragenter', 'dragover'].forEach((evt) => {
+  document.addEventListener(evt, (e) => {
+    if (!filesBeingDragged(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (evt === 'dragenter') dragDepth++;
+    document.body.classList.add('dragging');
+  });
+});
+document.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove('dragging');
+});
+document.addEventListener('drop', async (e) => {
+  if (!filesBeingDragged(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  await uploadFiles(e.dataTransfer.files);
 });
 
 form.addEventListener('submit', async (e) => {
