@@ -37,14 +37,18 @@ INDEX_HTML = """<!DOCTYPE html>
   header h1 { margin: 0; font-size: 16px; font-weight: 600; }
   #status { font-size: 12px; color: #a6e3a1; }
   #status.off { color: #f38ba8; }
-  #messages { flex: 1; overflow-y: auto; padding: 12px 16px; }
-  .msg { margin-bottom: 6px; line-height: 1.4; overflow-wrap: anywhere; }
-  .msg .name { font-weight: 600; color: #89b4fa; margin-right: 6px; }
+  #messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { display: flex; flex-direction: column; max-width: 78%; align-self: flex-start; align-items: flex-start; }
+  .msg.mine { align-self: flex-end; align-items: flex-end; }
+  .msg .name { font-weight: 600; color: #89b4fa; font-size: 12px; margin: 0 6px 2px; }
+  .bubble { padding: 8px 12px; border-radius: 14px; background: #313244; line-height: 1.4; overflow-wrap: anywhere; }
+  .msg.mine .bubble { background: #89b4fa; color: #1e1e2e; }
   .msg .body { white-space: pre-wrap; }
-  .msg .time { color: #6c7086; font-size: 11px; margin-left: 6px; }
-  .msg.system { color: #6c7086; font-style: italic; font-size: 13px; }
-  .msg .file-link { display: inline-block; margin-top: 4px; padding: 6px 10px; background: #313244; border-radius: 6px; color: #89b4fa; text-decoration: none; font-size: 13px; border: 1px solid #45475a; }
-  .msg .file-link:hover { background: #45475a; }
+  .msg .time { color: #6c7086; font-size: 11px; margin: 2px 6px 0; }
+  .msg.system { align-self: center; align-items: center; max-width: 90%; color: #6c7086; font-style: italic; font-size: 13px; text-align: center; }
+  .file-link { display: inline-block; padding: 6px 10px; background: #45475a; border-radius: 6px; color: #89b4fa; text-decoration: none; font-size: 13px; }
+  .msg.mine .file-link { background: rgba(30,30,46,0.18); color: #1e1e2e; }
+  .file-link:hover { filter: brightness(1.15); }
   form { display: flex; padding: 10px 12px; gap: 8px; background: #181825; border-top: 1px solid #313244; align-items: flex-end; }
   input, textarea, button { font-size: 14px; padding: 9px 12px; border-radius: 6px; border: 1px solid #313244; background: #313244; color: #cdd6f4; font-family: inherit; }
   input:focus, textarea:focus { outline: none; border-color: #89b4fa; }
@@ -80,7 +84,18 @@ const statusEl = document.getElementById('status');
 const fileInput = document.getElementById('fileInput');
 const fileBtn = document.getElementById('fileBtn');
 
-nameInput.value = localStorage.getItem('chat-name') || '';
+function detectDevice() {
+  const ua = navigator.userAgent, p = navigator.platform || '';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (/Mac/.test(p) && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Mac/.test(ua) || /Mac/.test(p)) return 'Mac';
+  if (/Win/.test(ua) || /Win/.test(p)) return 'PC';
+  if (/Linux/.test(ua)) return 'Linux';
+  return 'Appareil';
+}
+nameInput.value = localStorage.getItem('chat-name') || detectDevice();
+localStorage.setItem('chat-name', nameInput.value);
 nameInput.addEventListener('input', () => localStorage.setItem('chat-name', nameInput.value));
 
 function addMessage(msg) {
@@ -90,40 +105,45 @@ function addMessage(msg) {
   }
   
   const el = document.createElement('div');
-  el.className = 'msg' + (msg.system ? ' system' : '');
   const time = new Date(msg.time * 1000).toLocaleTimeString();
-  
+
   if (msg.system) {
-    const body = document.createElement('span');
-    body.className = 'body';
-    body.textContent = msg.text;
-    el.appendChild(body);
+    el.className = 'msg system';
+    el.textContent = msg.text;
   } else {
-    const n = document.createElement('span');
-    n.className = 'name';
-    n.textContent = msg.name + ':';
-    el.appendChild(n);
-    
+    const mine = msg.name === nameInput.value.trim();
+    el.className = 'msg' + (mine ? ' mine' : '');
+
+    if (!mine) {
+      const n = document.createElement('div');
+      n.className = 'name';
+      n.textContent = msg.name;
+      el.appendChild(n);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
     if (msg.file) {
       const link = document.createElement('a');
       link.className = 'file-link';
       link.href = '/file/' + msg.file.id;
       link.textContent = '📎 ' + msg.file.name + ' (' + formatBytes(msg.file.size) + ')';
       link.target = '_blank';
-      el.appendChild(link);
+      bubble.appendChild(link);
     } else {
       const body = document.createElement('span');
       body.className = 'body';
       body.textContent = msg.text;
-      el.appendChild(body);
+      bubble.appendChild(body);
     }
+    el.appendChild(bubble);
+
+    const t = document.createElement('div');
+    t.className = 'time';
+    t.textContent = time;
+    el.appendChild(t);
   }
-  
-  const t = document.createElement('span');
-  t.className = 'time';
-  t.textContent = time;
-  el.appendChild(t);
-  
+
   const stick = messagesEl.scrollTop + messagesEl.clientHeight >= messagesEl.scrollHeight - 40;
   messagesEl.appendChild(el);
   if (stick) messagesEl.scrollTop = messagesEl.scrollHeight;
