@@ -12,13 +12,13 @@ Lancement
 ---------
 1. Ouvrir Terminal.
 2. Aller dans le dossier de l'app :
-      cd /Users/gaudry/test-claude/app
+      cd ~/dev/ChatLAN
 3. Demarrer le serveur :
       python3 chat.py
 
 Le terminal affiche deux URLs :
-   Local  : http://localhost:8080
-   Reseau : http://<ip-du-mac>:8080
+   Local  : http://localhost:8090
+   Reseau : http://<ip-du-mac>:8090
 
 Connexion depuis les autres machines
 ------------------------------------
@@ -29,8 +29,8 @@ Si on ne connait pas l'IP du Mac, dans un autre Terminal :
       ipconfig getifaddr en0     (Wi-Fi)
       ipconfig getifaddr en1     (Ethernet/USB-C)
 
-L'IP actuelle de ce Mac est : 10.10.100.3
-URL Reseau complete : http://10.10.100.3:8080
+L'IP actuelle de ce Mac est : 10.10.100.8
+URL Reseau complete : http://10.10.100.8:8090
 
 Premiere connexion : macOS peut demander l'autorisation reseau pour
 Python. Cliquer "Autoriser".
@@ -45,4 +45,4 @@ Notes
   bibliotheque standard de Python.
 - L'historique des messages (200 derniers) est en memoire et perdu a
   l'arret.
-- Pour changer le port, editer la ligne PORT = 8080 en haut de chat.py.
+- Pour changer le port, editer la ligne PORT = 8090 en haut de chat.py.
