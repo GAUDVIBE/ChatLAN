@@ -11,7 +11,7 @@ import mimetypes
 from urllib.parse import urlparse, parse_qs
 from io import BytesIO
 
-PORT = 8080
+PORT = 8090
 MAX_HISTORY = 200
 MAX_TEXT_LEN = 50000
 MAX_FILE_SIZE = 10_000_000
