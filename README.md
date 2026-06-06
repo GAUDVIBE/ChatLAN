@@ -8,8 +8,22 @@ Prerequis
       python3 --version
   Si Mac propose d'installer les Command Line Tools, accepter.
 
-Lancement
----------
+Lancement rapide (double-clic)
+------------------------------
+Double-cliquer sur "launch-macos.command" dans le dossier du projet.
+Le serveur demarre et le navigateur s'ouvre tout seul sur l'URL locale.
+Le script trouve le port automatiquement et reutilise une instance
+deja en cours s'il y en a une.
+
+Au tout premier lancement, macOS peut afficher un avertissement de
+securite (script non signe) : clic droit sur le fichier -> "Ouvrir"
+-> "Ouvrir" (une seule fois).
+
+Pour le garder a portee de main, on peut copier "launch-macos.command"
+sur le Bureau.
+
+Lancement manuel (Terminal)
+---------------------------
 1. Ouvrir Terminal.
 2. Aller dans le dossier de l'app :
       cd ~/dev/ChatLAN
