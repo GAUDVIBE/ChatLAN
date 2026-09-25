@@ -8,7 +8,8 @@ import time
 import os
 import base64
 import mimetypes
-from urllib.parse import urlparse, parse_qs
+import unicodedata
+from urllib.parse import urlparse, parse_qs, quote
 from io import BytesIO
 
 PORT = 8090
@@ -265,6 +266,16 @@ form.addEventListener('submit', async (e) => {
 </html>
 """
 
+def content_disposition(name):
+    """En-tete RFC 6266. Les en-tetes HTTP sont encodes en latin-1 strict par
+    http.server : un nom accentue (NFD macOS, emoji, tiret cadratin...) y leve
+    UnicodeEncodeError et tue la requete. On envoie donc un repli ASCII plus
+    filename* en UTF-8 pourcent-encode."""
+    ascii_name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
+    ascii_name = ascii_name.replace('"', '').replace('\\', '').strip() or 'fichier'
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name, safe='')}"
+
+
 def broadcast(msg):
     with history_lock:
         history.append(msg)
@@ -342,7 +353,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             mime_type = file_data.get('mime', 'application/octet-stream')
             self.send_header('Content-Type', mime_type)
-            self.send_header('Content-Disposition', f'attachment; filename="{file_data["name"]}"')
+            self.send_header('Content-Disposition', content_disposition(file_data['name']))
             self.send_header('Content-Length', str(len(file_data['data'])))
             self.end_headers()
             self.wfile.write(file_data['data'])
@@ -419,7 +430,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     elif 'name="file"' in headers and 'filename=' in headers:
                         filename_start = headers.find('filename="') + 10
                         filename_end = headers.find('"', filename_start)
-                        file_name = headers[filename_start:filename_end]
+                        file_name = unicodedata.normalize('NFC', headers[filename_start:filename_end])
                         file_data = content
                 
                 if not name or not file_name or not file_data:
